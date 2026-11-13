@@ -3,7 +3,23 @@
     <h1 class="text-3xl font-bold tracking-tight text-text-dark sm:text-4xl">智能合同审查</h1>
     <p class="mt-3 text-base leading-7 text-text-light">上传您的合同文档，AI 将为您深度分析、识别风险、守护权益。</p>
 
-    <div class="mt-10 w-full max-w-2xl">
+    <div class="single-review-card mt-10 w-full max-w-2xl text-left">
+      <p class="single-review-card__eyebrow">单份合同审查</p>
+      <h2 class="single-review-card__title">上传 1 份合同即可开始</h2>
+      <p class="single-review-card__description">这是默认入口，只需选择一份 DOCX 或文字版 PDF，不要求同时上传多份。</p>
+
+      <div v-if="!aiStatus.loading && !aiStatus.configured" class="ai-status-warning" role="alert">
+        <strong>AI 审查服务暂不可用</strong>
+        <p>{{ aiStatus.message }}</p>
+      </div>
+
+      <div v-if="uploadError" class="upload-error" role="alert">
+        <strong>{{ uploadError.title }}</strong>
+        <p v-if="uploadError.filename">已保存文件：{{ uploadError.filename }}</p>
+        <p>{{ uploadError.message }}</p>
+        <button v-if="uploadError.retryable" type="button" @click="runPreAnalysis">重试 AI 预分析</button>
+      </div>
+
       <el-upload
         class="upload-dragger"
         drag
@@ -17,15 +33,17 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
           </svg>
           <div class="mt-4 flex text-sm leading-6 text-gray-600">
-            <span class="font-semibold text-primary">点击上传</span>
-            <p class="pl-1">或将文件拖到此处</p>
+            <span class="font-semibold text-primary">选择一份合同并开始审查</span>
+            <p class="pl-1">，或将文件拖到此处</p>
           </div>
           <p class="text-xs leading-5 text-gray-500">支持 .docx 和 .pdf 格式（PDF 需为可复制的文字版，不支持扫描件）</p>
         </div>
       </el-upload>
     </div>
 
-    <div class="linked-analysis-panel mt-8 w-full max-w-2xl text-left">
+    <details class="linked-analysis-disclosure mt-6 w-full max-w-2xl text-left">
+      <summary>需要同时对比主合同、附件或补充协议？展开多合同关联分析</summary>
+    <div class="linked-analysis-panel">
       <div>
         <p class="text-sm font-semibold text-primary">多合同关联分析</p>
         <h2 class="mt-1 text-xl font-semibold text-text-dark">同时审查主合同、附件和补充协议</h2>
@@ -97,6 +115,7 @@
         </div>
       </div>
     </div>
+    </details>
   </div>
 </template>
 
@@ -114,13 +133,17 @@ export default {
       linkedAnalysisLoading, linkedAnalysisResult, linkedAnalysisProgress,
       linkedFileInput, openLinkedFilePicker, handleLinkedFilesChange,
       removeLinkedFile, startLinkedContractAnalysis,
+      uploadError, aiStatus, loadAiStatus, runPreAnalysis,
     } = review;
+
+    onMounted(loadAiStatus);
 
     return {
       uploadAndGo, handleBeforeUpload, linkedGroupFiles,
       linkedAnalysisLoading, linkedAnalysisResult, linkedAnalysisProgress,
       linkedFileInput, openLinkedFilePicker, handleLinkedFilesChange,
       removeLinkedFile, startLinkedContractAnalysis,
+      uploadError, aiStatus, runPreAnalysis,
     };
   },
 };
@@ -140,16 +163,80 @@ export default {
 .upload-dragger :deep(.el-upload-dragger:hover) {
   @apply border-primary;
 }
+
+.single-review-card {
+  border: 2px solid #2563eb;
+  border-radius: 12px;
+  background: #fff;
+  padding: 22px;
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.12);
+}
+.single-review-card__eyebrow {
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+}
+.single-review-card__title {
+  margin-top: 4px;
+  color: #111827;
+  font-size: 22px;
+  font-weight: 700;
+}
+.single-review-card__description {
+  margin: 6px 0 16px;
+  color: #64748b;
+  font-size: 14px;
+}
+.ai-status-warning,
+.upload-error {
+  margin-bottom: 14px;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.ai-status-warning {
+  border: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+.upload-error {
+  border: 1px solid #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
+}
+.ai-status-warning p,
+.upload-error p {
+  margin-top: 3px;
+}
+.upload-error button {
+  margin-top: 9px;
+  border-radius: 6px;
+  background: #b91c1c;
+  color: #fff;
+  padding: 7px 12px;
+  font-weight: 700;
+}
+.linked-analysis-disclosure {
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.linked-analysis-disclosure > summary {
+  cursor: pointer;
+  list-style-position: inside;
+  padding: 16px 18px;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
 </style>
 
 <style>
 .linked-analysis-panel {
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
+  border-top: 1px solid #dbe3ef;
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   padding: 20px;
-  margin-bottom: 32px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  border-radius: 0 0 10px 10px;
 }
 .linked-analysis-panel__picker {
   display: flex;

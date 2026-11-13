@@ -30,6 +30,7 @@ const { getRelevantKnowledge, annotateKnowledgeUpdates } = require('./knowledge'
 const { callJsonLLM } = require('./llm');
 const { normalizeAnalysisResult, aggregateClauseResults, buildStandardComparison } = require('./analysisCore');
 const { analyzeSealAndSignature } = require('./seal');
+const { classifyLlmError } = require('../llmError');
 
 // 后台异步执行合同审查（不阻塞 HTTP 响应）
 const runAnalysisInBackground = async (contractId, userId, userPerspective, preAnalysisData) => {
@@ -367,9 +368,16 @@ ${clause.text}
         if (getIoInstance()) getIoInstance().to(`contract-${contractId}`).emit('analysis-complete', { results: analysisResult, perspective: userPerspective });
     } catch (error) {
         console.error('Error during background AI analysis:', error);
-        updateAnalysisJob(contractId, { status: 'failed', error: error.message });
-        await emitAnalysisProgress(null, contractId, { step: 'failed', status: 'failed', message: `分析失败：${error.message}` });
-        if (getIoInstance()) getIoInstance().to(`contract-${contractId}`).emit('analysis-failed', { error: error.message });
+        const publicError = classifyLlmError(error) || {
+            code: 'ANALYSIS_FAILED',
+            error: '合同分析失败，请稍后重试。',
+        };
+        updateAnalysisJob(contractId, { status: 'failed', error: publicError.error, errorCode: publicError.code });
+        await emitAnalysisProgress(null, contractId, { step: 'failed', status: 'failed', message: publicError.error });
+        if (getIoInstance()) getIoInstance().to(`contract-${contractId}`).emit('analysis-failed', {
+            error: publicError.error,
+            code: publicError.code,
+        });
     }
 };
 

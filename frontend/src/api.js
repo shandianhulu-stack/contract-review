@@ -32,6 +32,10 @@ export default {
         return apiClient.post('/contracts/pre-analyze', payload);
     },
 
+    getAiStatus() {
+        return apiClient.get('/contracts/ai-status');
+    },
+
     analyzeContract(payload) {
         // Payload now contains { contractId, contractType, userPerspective, reviewPoints, corePurposes }
         return apiClient.post('/contracts/analyze', payload);

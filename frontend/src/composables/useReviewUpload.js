@@ -18,6 +18,29 @@ export function useReviewUpload(state, deps) {
     const linkedAnalysisResult = ref(null);
     const linkedAnalysisProgress = ref([]);
     const linkedFileInput = ref(null);
+    const uploadError = ref(null);
+    const aiStatus = ref({ loading: true, configured: true, provider: '', model: '', message: '' });
+
+    const getApiError = (error, fallback) => ({
+        code: error?.response?.data?.code || 'REQUEST_FAILED',
+        message: error?.response?.data?.error || fallback,
+    });
+
+    const loadAiStatus = async () => {
+        aiStatus.value = { ...aiStatus.value, loading: true };
+        try {
+            const response = await api.getAiStatus();
+            aiStatus.value = { loading: false, ...response.data };
+        } catch (error) {
+            aiStatus.value = {
+                loading: false,
+                configured: false,
+                provider: '',
+                model: '',
+                message: '暂时无法读取 AI 服务状态，请联系管理员检查后端服务。',
+            };
+        }
+    };
 
     const loadReviewTemplates = async () => {
         try {
@@ -39,6 +62,7 @@ export function useReviewUpload(state, deps) {
     };
 
     const handleBeforeUpload = (file) => {
+        uploadError.value = null;
         const ext = file.name.split('.').pop().toLowerCase();
         const isValid = ['docx', 'pdf'].includes(ext);
         if (!isValid) {
@@ -55,12 +79,9 @@ export function useReviewUpload(state, deps) {
         return isValid;
     };
 
-    const handleUploadSuccess = async (res) => {
-        contract.id = res.contractId;
-        contract.editorConfig = res.editorConfig;
-        contract.original_filename = res.editorConfig.document.title;
-        setupSocket(contract.id);
-
+    const runPreAnalysis = async () => {
+        if (!contract.id) return;
+        uploadError.value = null;
         loading.value = true;
         loadingMessage.value = 'AI正在进行初步分析，请稍候...';
         try {
@@ -78,16 +99,37 @@ export function useReviewUpload(state, deps) {
             }
             activeStep.value = 1;
         } catch (err) {
-            ElMessage.error(err.response?.data?.error || '预分析失败，请重试。');
-            resetState();
+            const apiError = getApiError(err, '预分析失败，请稍后重试。');
+            uploadError.value = {
+                ...apiError,
+                title: '合同已上传，但 AI 预分析未完成',
+                filename: contract.original_filename,
+                retryable: true,
+            };
+            ElMessage.error(apiError.message);
         } finally {
             loading.value = false;
         }
     };
 
-    const handleUploadError = () => {
+    const handleUploadSuccess = async (res) => {
+        contract.id = res.contractId;
+        contract.editorConfig = res.editorConfig;
+        contract.original_filename = res.editorConfig.document.title;
+        setupSocket(contract.id);
+        await runPreAnalysis();
+    };
+
+    const handleUploadError = (error) => {
         loading.value = false;
-        ElMessage.error('上传失败，请检查后端服务是否正常。');
+        const apiError = getApiError(error, '上传失败，请检查文件或后端服务后重试。');
+        uploadError.value = {
+            ...apiError,
+            title: '单份合同上传失败',
+            filename: '',
+            retryable: false,
+        };
+        ElMessage.error(apiError.message);
     };
 
     const validateContractFile = (file) => {
@@ -241,9 +283,9 @@ export function useReviewUpload(state, deps) {
 
         try {
             const res = await api.uploadContract(formData);
-            handleUploadSuccess(res.data);
+            await handleUploadSuccess(res.data);
         } catch (err) {
-            handleUploadError();
+            handleUploadError(err);
         }
     };
 
@@ -260,8 +302,9 @@ export function useReviewUpload(state, deps) {
     return {
         linkedGroupFiles, linkedAnalysisLoading, linkedAnalysisResult,
         linkedAnalysisProgress, linkedFileInput,
+        uploadError, aiStatus,
         loadReviewTemplates, handleBeforeUpload, handleUploadSuccess,
-        handleUploadError, validateContractFile, openLinkedFilePicker,
+        handleUploadError, loadAiStatus, runPreAnalysis, validateContractFile, openLinkedFilePicker,
         setLinkedProgress, handleLinkedFilesChange, removeLinkedFile, handleTemplateChange,
         uploadContractToGroup, startLinkedContractAnalysis, uploadAndGo, goBackToUpload, goBackToConfirm,
     };

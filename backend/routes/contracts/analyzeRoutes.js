@@ -26,8 +26,20 @@ const { matchTemplate, getTemplateById } = require('../../services/reviewTemplat
 const { getRelevantKnowledge, annotateKnowledgeUpdates } = require('../../services/contractAnalysis/knowledge');
 const { parseJsonField } = require('../../services/contractAnalysis/reportRendering');
 const { runAnalysisInBackground } = require('../../services/contractAnalysis/backgroundAnalysis');
+const { getLlmConfigurationStatus } = require('../../services/llmClient');
+const { classifyLlmError } = require('../../services/llmError');
 
 module.exports = function (router) {
+    router.get('/ai-status', (req, res) => {
+        const status = getLlmConfigurationStatus();
+        res.json({
+            ...status,
+            message: status.configured
+                ? 'AI 模型参数已配置，实际可用性以合同预分析调用结果为准。'
+                : 'AI 模型尚未完成配置，合同可以上传，但暂时无法进行 AI 审查。',
+        });
+    });
+
     router.post('/pre-analyze', async (req, res) => {
         const { contractId } = req.body;
         if (!contractId) return res.status(400).json({ error: 'Contract ID is required.' });
@@ -109,6 +121,8 @@ ${wrapContractContent(plainText)}
             res.json(analysisResult);
         } catch (error) {
             console.error(`[ERROR] Pre-analysis failed for contract ${contractId}:`, error);
+            const llmError = classifyLlmError(error);
+            if (llmError) return res.status(llmError.status).json(llmError);
             res.status(500).json({ error: '预分析失败，请稍后重试。' });
         }
     });

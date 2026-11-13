@@ -39,8 +39,23 @@ const getLlmClient = () => {
     return llmClient;
 };
 
+const getLlmConfigurationStatus = () => {
+    const baseURL = String(process.env.LLM_BASE_URL || '');
+    const model = String(process.env.LLM_MODEL || '');
+    const configured = Boolean(process.env.LLM_API_KEY && baseURL && model);
+    let provider = 'OpenAI 兼容模型';
+    if (/volces|volcengine|ark\.cn-/i.test(baseURL)) provider = '豆包（火山方舟）';
+    if (/3010|open-webui/i.test(baseURL)) provider = '内部 AI 网关';
+    return {
+        configured,
+        provider,
+        model: configured ? model : '',
+    };
+};
+
 const isRetryableError = (error) => {
     const status = error?.status || error?.response?.status;
+    if (/LLM_(API_KEY|BASE_URL|MODEL) is required/i.test(String(error?.message || ''))) return false;
     if (!status) return true;
     return status === 408 || status === 409 || status === 429 || status >= 500;
 };
@@ -102,4 +117,5 @@ const createVisionCompletion = async (options, requestOptions = {}) => {
 module.exports = {
     createChatCompletion,
     createVisionCompletion,
+    getLlmConfigurationStatus,
 };
