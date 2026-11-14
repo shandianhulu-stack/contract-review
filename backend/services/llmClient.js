@@ -4,12 +4,13 @@
  *
  * 核心职责：
  * - 懒加载并复用 OpenAI 客户端实例（基于环境变量配置）
+ * - 兼容调研系统 ARK_ACCOUNT_1..3 配置，按账户自动轮换与故障切换
  * - 提供聊天补全（createChatCompletion）与视觉补全（createVisionCompletion）接口
  * - 对可重试错误（408/409/429/5xx）执行指数退避重试
  *
  * 关键实现：
  * - 通过环境变量 LLM_API_KEY/LLM_BASE_URL/LLM_MODEL 配置客户端
- * - 视觉模型可通过 VISION_MODEL_NAME 指定，默认 Qwen2.5-VL
+ * - 视觉模型可通过 VISION_MODEL_NAME 指定，默认复用当前账户模型
  * - 重试次数、退避基数、超时均可通过环境变量调节
  *
  * 依赖关系：
@@ -17,9 +18,9 @@
  * - 下游：incrementalReview、negotiationSimulator、reviewTemplates 等需要 LLM 的服务
  */
 
-const { OpenAI } = require('openai');
-
-let llmClient;
+const clients = new Map();
+let roundRobinCursor = 0;
+let OpenAIClass;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -29,20 +30,56 @@ const getRequiredEnv = (name) => {
     return value;
 };
 
-const getLlmClient = () => {
-    if (!llmClient) {
-        llmClient = new OpenAI({
-            apiKey: getRequiredEnv('LLM_API_KEY'),
-            baseURL: getRequiredEnv('LLM_BASE_URL'),
-        });
+const getAccountConfigs = () => {
+    const arkAccounts = [1, 2, 3]
+        .map((slot) => ({
+            id: process.env[`ARK_ACCOUNT_${slot}_ID`] || `ark-account-${slot}`,
+            apiKey: process.env[`ARK_ACCOUNT_${slot}_API_KEY`],
+            baseURL: process.env[`ARK_ACCOUNT_${slot}_BASE_URL`],
+            model: process.env[`ARK_ACCOUNT_${slot}_MODEL`],
+        }))
+        .filter((account) => account.apiKey && account.baseURL && account.model);
+
+    if (arkAccounts.length > 0) return arkAccounts;
+
+    if (process.env.LLM_API_KEY && process.env.LLM_BASE_URL && process.env.LLM_MODEL) {
+        return [{
+            id: 'default',
+            apiKey: process.env.LLM_API_KEY,
+            baseURL: process.env.LLM_BASE_URL,
+            model: process.env.LLM_MODEL,
+        }];
     }
-    return llmClient;
+
+    return [];
+};
+
+const getLlmClient = (account) => {
+    if (!account) throw new Error('LLM_API_KEY is required for OpenAI-compatible LLM calls.');
+    if (!OpenAIClass) ({ OpenAI: OpenAIClass } = require('openai'));
+    const cacheKey = `${account.id}:${account.baseURL}`;
+    if (!clients.has(cacheKey)) {
+        clients.set(cacheKey, new OpenAIClass({
+            apiKey: account.apiKey,
+            baseURL: account.baseURL,
+        }));
+    }
+    return clients.get(cacheKey);
+};
+
+const getOrderedAccounts = () => {
+    const accounts = getAccountConfigs();
+    if (accounts.length <= 1) return accounts;
+    const start = roundRobinCursor % accounts.length;
+    roundRobinCursor = (roundRobinCursor + 1) % accounts.length;
+    return accounts.slice(start).concat(accounts.slice(0, start));
 };
 
 const getLlmConfigurationStatus = () => {
-    const baseURL = String(process.env.LLM_BASE_URL || '');
-    const model = String(process.env.LLM_MODEL || '');
-    const configured = Boolean(process.env.LLM_API_KEY && baseURL && model);
+    const accounts = getAccountConfigs();
+    const baseURL = String(accounts[0]?.baseURL || process.env.LLM_BASE_URL || '');
+    const model = String(accounts[0]?.model || process.env.LLM_MODEL || '');
+    const configured = accounts.length > 0;
     let provider = 'OpenAI 兼容模型';
     if (/volces|volcengine|ark\.cn-/i.test(baseURL)) provider = '豆包（火山方舟）';
     if (/3010|open-webui/i.test(baseURL)) provider = '内部 AI 网关';
@@ -50,6 +87,7 @@ const getLlmConfigurationStatus = () => {
         configured,
         provider,
         model: configured ? model : '',
+        accountCount: accounts.length,
     };
 };
 
@@ -60,62 +98,77 @@ const isRetryableError = (error) => {
     return status === 408 || status === 409 || status === 429 || status >= 500;
 };
 
-const createChatCompletion = async (options, requestOptions = {}) => {
+const isAccountFailoverError = (error) => {
+    const status = error?.status || error?.response?.status;
+    const code = String(error?.code || error?.error?.code || error?.response?.data?.error?.code || '');
+    return isRetryableError(error)
+        || status === 401
+        || status === 403
+        || /AccountOverdue|SetLimitExceeded|Quota|RateLimit|Unauthorized|Forbidden/i.test(code);
+};
+
+const safeErrorLabel = (error) => {
+    const status = error?.status || error?.response?.status || 'network';
+    const code = String(error?.code || error?.error?.code || error?.response?.data?.error?.code || 'unknown');
+    return `${status}/${code}`;
+};
+
+const createWithAccountFailover = async ({ options, requestOptions, vision = false }) => {
+    const accounts = getOrderedAccounts();
+    if (accounts.length === 0) {
+        getRequiredEnv('LLM_API_KEY');
+        getRequiredEnv('LLM_BASE_URL');
+        getRequiredEnv('LLM_MODEL');
+        throw new Error('No complete LLM account configuration is available.');
+    }
+
     const maxRetries = Number(process.env.LLM_MAX_RETRIES || 2);
     const baseDelay = Number(process.env.LLM_RETRY_BASE_MS || 800);
     const timeout = Number(process.env.LLM_TIMEOUT_MS || 90000);
     let lastError;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        try {
-            return await getLlmClient().chat.completions.create({
-                model: getRequiredEnv('LLM_MODEL'),
-                ...options,
-            }, {
-                timeout,
-                ...requestOptions,
-            });
-        } catch (error) {
-            lastError = error;
-            if (attempt >= maxRetries || !isRetryableError(error)) break;
-            const delay = baseDelay * (2 ** attempt) + Math.floor(Math.random() * 250);
-            console.warn(`[LLM] Chat completion failed; retrying in ${delay}ms (${attempt + 1}/${maxRetries}).`, error.message);
-            await sleep(delay);
+        for (let accountIndex = 0; accountIndex < accounts.length; accountIndex += 1) {
+            const account = accounts[accountIndex];
+            try {
+                return await getLlmClient(account).chat.completions.create({
+                    model: vision ? (process.env.VISION_MODEL_NAME || account.model) : account.model,
+                    ...options,
+                }, {
+                    timeout,
+                    ...requestOptions,
+                });
+            } catch (error) {
+                lastError = error;
+                const hasAnotherAccount = accountIndex < accounts.length - 1;
+                if (!isAccountFailoverError(error)) throw error;
+                if (hasAnotherAccount) {
+                    console.warn(`[LLM] Account ${account.id} unavailable (${safeErrorLabel(error)}); switching account.`);
+                }
+            }
         }
+
+        if (attempt >= maxRetries || !isRetryableError(lastError)) break;
+        const delay = baseDelay * (2 ** attempt) + Math.floor(Math.random() * 250);
+        console.warn(`[LLM] All configured accounts unavailable; retrying in ${delay}ms (${attempt + 1}/${maxRetries}).`);
+        await sleep(delay);
     }
 
     throw lastError;
 };
 
+const createChatCompletion = async (options, requestOptions = {}) => {
+    return createWithAccountFailover({ options, requestOptions });
+};
+
 const createVisionCompletion = async (options, requestOptions = {}) => {
-    const maxRetries = Number(process.env.LLM_MAX_RETRIES || 2);
-    const baseDelay = Number(process.env.LLM_RETRY_BASE_MS || 800);
-    const timeout = Number(process.env.LLM_TIMEOUT_MS || 90000);
-    let lastError;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        try {
-            return await getLlmClient().chat.completions.create({
-                model: process.env.VISION_MODEL_NAME || 'Qwen/Qwen2.5-VL-7B-Instruct',
-                ...options,
-            }, {
-                timeout,
-                ...requestOptions,
-            });
-        } catch (error) {
-            lastError = error;
-            if (attempt >= maxRetries || !isRetryableError(error)) break;
-            const delay = baseDelay * (2 ** attempt) + Math.floor(Math.random() * 250);
-            console.warn(`[LLM] Vision completion failed; retrying in ${delay}ms (${attempt + 1}/${maxRetries}).`, error.message);
-            await sleep(delay);
-        }
-    }
-
-    throw lastError;
+    return createWithAccountFailover({ options, requestOptions, vision: true });
 };
 
 module.exports = {
     createChatCompletion,
     createVisionCompletion,
     getLlmConfigurationStatus,
+    getAccountConfigs,
+    isAccountFailoverError,
 };
