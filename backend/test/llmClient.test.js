@@ -5,6 +5,7 @@ const {
     getAccountConfigs,
     getLlmConfigurationStatus,
     isAccountFailoverError,
+    isUnsupportedResponseFormatError,
 } = require('../services/llmClient');
 
 const managedEnvNames = [
@@ -70,4 +71,27 @@ test('fails over for quota, overdue, authorization and transient upstream errors
     assert.equal(isAccountFailoverError({ status: 401 }), true);
     assert.equal(isAccountFailoverError({ status: 503 }), true);
     assert.equal(isAccountFailoverError({ status: 400, code: 'InvalidParameter' }), false);
+});
+
+test('detects only unsupported response_format errors for compatibility fallback', () => {
+    assert.equal(isUnsupportedResponseFormatError({
+        status: 400,
+        code: 'InvalidParameter',
+        param: 'response_format.type',
+        message: 'json_object is not supported by this model',
+    }), true);
+    assert.equal(isUnsupportedResponseFormatError({
+        status: 400,
+        code: 'InvalidParameter',
+        message: 'The parameter response_format.type is not valid: json_object is not supported',
+    }), true);
+    assert.equal(isUnsupportedResponseFormatError({
+        status: 400,
+        code: 'InvalidParameter',
+        param: 'temperature',
+    }), false);
+    assert.equal(isUnsupportedResponseFormatError({
+        status: 429,
+        code: 'SetLimitExceeded',
+    }), false);
 });

@@ -107,6 +107,17 @@ const isAccountFailoverError = (error) => {
         || /AccountOverdue|SetLimitExceeded|Quota|RateLimit|Unauthorized|Forbidden/i.test(code);
 };
 
+const isUnsupportedResponseFormatError = (error) => {
+    const status = error?.status || error?.response?.status;
+    const code = String(error?.code || error?.error?.code || error?.response?.data?.error?.code || '');
+    const param = String(error?.param || error?.error?.param || error?.response?.data?.error?.param || '');
+    const message = String(error?.message || error?.error?.message || error?.response?.data?.error?.message || '');
+    return status === 400
+        && /InvalidParameter/i.test(code)
+        && (param === 'response_format.type'
+            || (/response_format(?:\.type)?/i.test(message) && /not supported|not valid/i.test(message)));
+};
+
 const safeErrorLabel = (error) => {
     const status = error?.status || error?.response?.status || 'network';
     const code = String(error?.code || error?.error?.code || error?.response?.data?.error?.code || 'unknown');
@@ -158,7 +169,16 @@ const createWithAccountFailover = async ({ options, requestOptions, vision = fal
 };
 
 const createChatCompletion = async (options, requestOptions = {}) => {
-    return createWithAccountFailover({ options, requestOptions });
+    try {
+        return await createWithAccountFailover({ options, requestOptions });
+    } catch (error) {
+        if (!options?.response_format || !isUnsupportedResponseFormatError(error)) throw error;
+
+        const fallbackOptions = { ...options };
+        delete fallbackOptions.response_format;
+        console.warn('[LLM] Current model does not support response_format; retrying with prompt-constrained JSON output.');
+        return createWithAccountFailover({ options: fallbackOptions, requestOptions });
+    }
 };
 
 const createVisionCompletion = async (options, requestOptions = {}) => {
@@ -171,4 +191,5 @@ module.exports = {
     getLlmConfigurationStatus,
     getAccountConfigs,
     isAccountFailoverError,
+    isUnsupportedResponseFormatError,
 };
