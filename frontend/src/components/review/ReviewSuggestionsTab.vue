@@ -10,7 +10,7 @@
         >{{ index + 1 }}</el-checkbox>
       </el-checkbox-group>
       <div class="flex items-center gap-2">
-        <span v-if="isPdfContract" class="text-xs text-amber-600">PDF 不支持采纳</span>
+        <span v-if="isPdfContract" class="text-xs text-amber-600">PDF 请在左侧手工编辑/批注</span>
         <button @click="applySelectedSuggestions" :disabled="batchApplying || isPdfContract || selectedSuggestionIndexes.length === 0" class="px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed">
           {{ batchApplying ? '批量采纳中...' : '一键采纳所选' }}
         </button>
@@ -27,7 +27,7 @@
               </button>
             </el-tooltip>
             <el-tooltip content="添加批注" placement="top">
-              <button @click="addDocComment(suggestionOriginal(item), suggestionReason(item))" class="p-1 text-gray-400 hover:text-primary transition-colors">
+              <button @click="addDocComment(suggestionOriginal(item), suggestionReason(item))" :disabled="!canComment" :title="canComment ? '尝试将批注写入编辑器' : '当前文档未开放批注权限'" class="p-1 text-gray-400 hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>
               </button>
             </el-tooltip>
@@ -72,7 +72,7 @@
         </div>
 
         <div class="mt-4 pt-3 border-t border-gray-100 flex justify-end items-center">
-          <span v-if="isPdfContract" class="mr-2 text-xs text-amber-600">PDF 文件不支持原文改写，请使用审查报告导出或 PDF 批注</span>
+          <span v-if="isPdfContract" class="mr-2 text-xs text-amber-600">PDF 支持左侧人工编辑与原生批注；AI 自动替换仅支持 DOCX</span>
           <button
             @click="toggleNegotiation(item)"
             :disabled="item._negotiationLoading"
@@ -139,7 +139,7 @@
 </template>
 
 <script>
-import { inject } from 'vue';
+import { computed, inject } from 'vue';
 import { ElCheckboxGroup, ElCheckbox, ElTooltip } from 'element-plus';
 
 export default {
@@ -148,14 +148,19 @@ export default {
   setup() {
     const review = inject('review');
     const {
-      reviewData, showPlainLanguage, isPdfContract,
+      reviewData, showPlainLanguage, isPdfContract, contract,
       selectedSuggestionIndexes, batchApplying,
       suggestionTitle, suggestionOriginal, suggestionText, suggestionReason,
       locateText, addDocComment, previewSuggestion, adoptSuggestion,
       applySelectedSuggestions, toggleNegotiation, adoptFallbackOption,
     } = review;
+    const canComment = computed(() => Boolean(
+      contract.editorConfig?.document?.permissions?.comment
+      && contract.editorConfig?.editorConfig?.mode === 'edit'
+    ));
     return {
       reviewData, showPlainLanguage, isPdfContract,
+      canComment,
       selectedSuggestionIndexes, batchApplying,
       suggestionTitle, suggestionOriginal, suggestionText, suggestionReason,
       locateText, addDocComment, previewSuggestion, adoptSuggestion,

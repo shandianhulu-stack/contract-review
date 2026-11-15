@@ -1,14 +1,23 @@
 <template>
-  <div class="flex-grow min-h-0 flex space-x-4">
+  <div class="flex-grow min-h-0 flex flex-col xl:flex-row gap-4">
     <!-- Left Side: OnlyOffice Editor -->
-    <div class="w-2/3 bg-white rounded-lg shadow-md overflow-hidden h-full flex flex-col">
-      <div class="px-3 py-2 border-b border-border-color bg-bg-subtle flex items-center justify-between gap-3">
-        <div class="text-sm text-text-main">
-          左侧为合同实时预览与编辑区。可选中文本后进行专项审查。
+    <div class="w-full xl:w-3/5 bg-white rounded-lg shadow-md overflow-hidden h-full min-h-[560px] flex flex-col">
+      <div class="px-4 py-3 border-b border-border-color bg-bg-subtle flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="text-sm font-semibold text-text-dark truncate">{{ contract.original_filename || '合同原文' }}</p>
+            <span :class="isPdfContract ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200'" class="px-2 py-0.5 text-xs font-medium border rounded-full">
+              {{ isPdfContract ? 'PDF 编辑与批注' : 'DOCX 编辑与修订' }}
+            </span>
+          </div>
+          <p class="mt-1 text-xs text-text-light">
+            {{ isPdfContract ? 'PDF 可选择文本、手工编辑、批注与表单填写；AI 一键替换仅支持 DOCX。' : '可实时编辑、批注、修订，并将 AI 建议一键采纳到原文。' }}
+          </p>
         </div>
-        <button @click="prepareFocusedReviewFromSelection" class="px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:bg-primary-dark">
-          读取选中文本审查
-        </button>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button @click="forceSaveCurrentDocument(false)" class="px-3 py-1.5 text-xs font-medium text-primary bg-white border border-primary rounded hover:bg-primary-light">保存合同</button>
+          <button @click="prepareFocusedReviewFromSelection" class="px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:bg-primary-dark">读取选区审查</button>
+        </div>
       </div>
       <DocumentEditor
         v-if="contract.editorConfig"
@@ -39,20 +48,20 @@
     </div>
 
     <!-- Right Side: AI Review Panel -->
-    <div class="w-1/3 bg-white rounded-lg shadow-md flex flex-col h-full">
+    <div class="w-full xl:w-2/5 bg-white rounded-lg shadow-md flex flex-col h-full min-h-[560px]">
       <!-- Panel Header -->
-      <div class="p-3 border-b border-border-color flex justify-between items-center flex-shrink-0">
-        <div class="flex items-center">
+      <div class="p-3 border-b border-border-color flex flex-col 2xl:flex-row 2xl:justify-between 2xl:items-center gap-2 flex-shrink-0">
+        <div class="flex items-center justify-between">
           <h3 class="text-lg font-semibold text-text-dark">AI 审查报告</h3>
           <div class="ml-4 flex items-center">
             <span class="text-xs text-text-light mr-1">大白话模式</span>
             <el-switch v-model="showPlainLanguage" size="small"></el-switch>
           </div>
         </div>
-        <div class="flex items-center flex-nowrap whitespace-nowrap">
+        <div class="flex items-center flex-wrap gap-y-1 whitespace-nowrap">
           <button @click="exportReport('html')" class="mr-3 text-sm font-medium text-primary hover:text-primary-dark whitespace-nowrap">导出HTML</button>
           <button @click="exportReport('word')" class="mr-3 text-sm font-medium text-primary hover:text-primary-dark whitespace-nowrap">导出Word</button>
-          <button @click="downloadPdfAnnotations" class="mr-3 text-sm font-medium text-primary hover:text-primary-dark whitespace-nowrap">PDF批注</button>
+          <button @click="downloadPdfAnnotations" class="mr-3 text-sm font-medium text-primary hover:text-primary-dark whitespace-nowrap">导出批注意见（TXT）</button>
           <template v-if="cameFromHistory">
             <button @click="goBackToUpload" class="text-sm font-medium text-primary hover:text-primary-dark">重新上传</button>
             <button @click="goBackSmart" class="ml-4 text-sm font-medium text-primary hover:text-primary-dark">返回历史</button>
@@ -118,6 +127,7 @@ export default {
       contract, onlyOfficeUrl, onDocumentReady, onDocumentStateChange,
       docEditorComponent, selectedSuggestionPreview,
       prepareFocusedReviewFromSelection,
+      forceSaveCurrentDocument, isPdfContract,
       showPlainLanguage, exportReport, downloadPdfAnnotations,
       cameFromHistory, goBackToUpload, goBackSmart,
       activeAiTab, reviewData, isLawOutdated,
@@ -127,6 +137,7 @@ export default {
       contract, onlyOfficeUrl, onDocumentReady, onDocumentStateChange,
       docEditorComponent, selectedSuggestionPreview,
       prepareFocusedReviewFromSelection,
+      forceSaveCurrentDocument, isPdfContract,
       showPlainLanguage, exportReport, downloadPdfAnnotations,
       cameFromHistory, goBackToUpload, goBackSmart,
       activeAiTab, reviewData, isLawOutdated,
