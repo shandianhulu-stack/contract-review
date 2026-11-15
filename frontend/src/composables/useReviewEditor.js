@@ -11,12 +11,33 @@ export function useReviewEditor(state, helpers) {
     const forceSaveDebounceTimer = ref(null);
     const forceSaveInFlight = ref(false);
     const hasPendingEditorChanges = ref(false);
+    let connectorEditor = null;
+    let editorConnector = null;
 
     const getEditor = () => window?.DocEditor?.instances?.docEditorComponent || null;
 
+    const getEditorConnector = () => {
+        const editor = getEditor();
+        if (!editor) return null;
+
+        if (connectorEditor !== editor) {
+            connectorEditor = editor;
+            editorConnector = null;
+        }
+
+        if (!editorConnector && typeof editor.createConnector === 'function') {
+            editorConnector = editor.createConnector();
+        }
+        return editorConnector;
+    };
+
     const executeEditorMethod = (method, args = []) => {
         const editor = getEditor();
-        if (!editor || typeof editor.executeMethod !== 'function') {
+        const connector = getEditorConnector();
+        const methodTarget = typeof connector?.executeMethod === 'function'
+            ? connector
+            : editor;
+        if (!methodTarget || typeof methodTarget.executeMethod !== 'function') {
             return Promise.reject(new Error('EDITOR_NOT_READY'));
         }
         return new Promise((resolve, reject) => {
@@ -27,7 +48,7 @@ export function useReviewEditor(state, helpers) {
                 resolve(null);
             }, 2500);
             try {
-                editor.executeMethod(method, args, (result) => {
+                methodTarget.executeMethod(method, args, (result) => {
                     if (settled) return;
                     settled = true;
                     clearTimeout(timer);
@@ -40,6 +61,66 @@ export function useReviewEditor(state, helpers) {
                 reject(error);
             }
         });
+    };
+
+    const executeEditorCommand = (commandFn) => {
+        const connector = getEditorConnector();
+        if (!connector || typeof connector.callCommand !== 'function') {
+            return Promise.reject(new Error('EDITOR_CONNECTOR_NOT_AVAILABLE'));
+        }
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                resolve(null);
+            }, 2500);
+            try {
+                connector.callCommand(commandFn, (result) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve(result);
+                }, true);
+            } catch (error) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                reject(error);
+            }
+        });
+    };
+
+    const getSelectedTextFromEditor = async () => {
+        const displayOptions = {
+            Numbering: false,
+            Math: false,
+            TableCellSeparator: '\n',
+            TableRowSeparator: '\n',
+            ParaSeparator: '\n',
+            TabSymbol: '\t',
+            NewLineSeparator: '\n',
+        };
+
+        let selectedText = null;
+        try {
+            selectedText = await executeEditorMethod('GetSelectedText', [displayOptions]);
+        } catch {
+            // Some 9.x builds expose the PDF selection only through callCommand.
+        }
+        if (selectedText && String(selectedText).trim()) return String(selectedText);
+
+        const commandResult = await executeEditorCommand(function() {
+            try {
+                const document = Api.GetDocument();
+                return document && typeof document.GetSelectedText === 'function'
+                    ? document.GetSelectedText()
+                    : '';
+            } catch (error) {
+                return '';
+            }
+        });
+        return commandResult ? String(commandResult) : '';
     };
 
     const findTextRange = async (text) => {
@@ -401,6 +482,8 @@ export function useReviewEditor(state, helpers) {
 
     const onDocumentReady = () => {
         console.log("[INFO] OnlyOffice document is ready.");
+        connectorEditor = null;
+        editorConnector = null;
         setTimeout(() => {
             isEditorReady.value = Boolean(window?.DocEditor?.instances?.docEditorComponent);
             if (isEditorReady.value) startAutoForceSave();
@@ -409,7 +492,8 @@ export function useReviewEditor(state, helpers) {
 
     return {
         forceSaveTimer, forceSaveDebounceTimer, forceSaveInFlight, hasPendingEditorChanges,
-        getEditor, executeEditorMethod, findTextRange, normalizeCandidate,
+        getEditor, getEditorConnector, executeEditorMethod, executeEditorCommand,
+        getSelectedTextFromEditor, findTextRange, normalizeCandidate,
         splitCandidateSentences, buildSuggestionCandidates, findTextRangeByCandidates,
         ensureEditorReady, previewSuggestion, locateText, replaceTextOnServer,
         markAdoptedText, replaceTextInEditor, refreshEditorDocument, serverFallback,

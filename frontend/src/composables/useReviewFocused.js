@@ -9,7 +9,7 @@ export function useReviewFocused(state, editor) {
         activeAiTab, focusedReviewText, focusedReviewQuestion,
         focusedReviewResult, focusedReviewLoading, selectedSuggestionPreview,
     } = state;
-    const { executeEditorMethod, ensureEditorReady, replaceTextInEditorFinal } = editor;
+    const { getSelectedTextFromEditor, ensureEditorReady, replaceTextInEditorFinal } = editor;
 
     const focusedReviewHistory = ref([]);
     const focusedReviewHistoryLoading = ref(false);
@@ -19,7 +19,7 @@ export function useReviewFocused(state, editor) {
         if (!ensureEditorReady()) return;
 
         try {
-            const text = await executeEditorMethod('GetSelectedText', []);
+            const text = await getSelectedTextFromEditor();
             if (text && String(text).trim()) {
                 focusedReviewText.value = String(text).trim();
                 ElMessage.success('已读取左侧选中文本。');
@@ -27,7 +27,7 @@ export function useReviewFocused(state, editor) {
                 ElMessage.info('未读取到选中文本，可在专项审查框中手动粘贴条款。');
             }
         } catch (error) {
-            ElMessage.info('当前 OnlyOffice 版本未暴露选中文本接口，请手动粘贴条款进行专项审查。');
+            ElMessage.info('当前 OnlyOffice 服务未启用选中文本连接接口，请手动粘贴条款进行专项审查。');
         }
     };
 
