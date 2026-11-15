@@ -40,6 +40,7 @@ export function useReviewAnalysis(state) {
                 if (typeof data.percent === 'number') analysisPercent.value = data.percent;
                 if (Array.isArray(data.steps)) analysisSteps.value = data.steps;
                 if (typeof data.elapsedSeconds === 'number') analysisElapsed.value = data.elapsedSeconds;
+                if (typeof data.estimatedRemainingSeconds === 'number') analysisEta.value = data.estimatedRemainingSeconds;
                 if (data.status === 'completed' && data.result) {
                     Object.assign(reviewData, data.result);
                     analysisActive.value = false;

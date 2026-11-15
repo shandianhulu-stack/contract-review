@@ -28,16 +28,39 @@ const cleanJsonResponse = (text) => {
     return JSON.parse(jsonText);
 };
 
-const callJsonLLM = async (prompt) => {
+const clampInteger = (value, fallback, min, max) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, Math.trunc(parsed)));
+};
+
+const getJsonRequestPolicy = () => ({
+    timeout: clampInteger(process.env.LLM_JSON_TIMEOUT_MS, 180000, 10000, 600000),
+    maxRetries: clampInteger(process.env.LLM_JSON_MAX_RETRIES, 0, 0, 2),
+});
+
+const buildJsonCompletionOptions = (content, maxTokens) => {
+    const responseMode = String(process.env.LLM_JSON_RESPONSE_MODE || 'auto').trim().toLowerCase();
+    const options = {
+        messages: [{ role: 'user', content }],
+        max_tokens: maxTokens,
+    };
+    if (!['prompt', 'off', 'disabled'].includes(responseMode)) {
+        options.response_format = { type: 'json_object' };
+    }
+    return options;
+};
+
+const callJsonLLM = async (prompt, hooks = {}) => {
     const configuredMaxTokens = Number(process.env.LLM_JSON_MAX_TOKENS || 16000);
     const maxTokens = Number.isFinite(configuredMaxTokens)
         ? Math.min(32768, Math.max(1024, configuredMaxTokens))
         : 16000;
-    const requestJson = (content) => createChatCompletion({
-        messages: [{ role: 'user', content }],
-        response_format: { type: 'json_object' },
-        max_tokens: maxTokens,
-    });
+    const requestPolicy = getJsonRequestPolicy();
+    const requestJson = (content) => createChatCompletion(
+        buildJsonCompletionOptions(content, maxTokens),
+        { ...requestPolicy, onAttempt: hooks.onAttempt },
+    );
 
     const completion = await requestJson(prompt);
     try {
@@ -52,5 +75,7 @@ const callJsonLLM = async (prompt) => {
 
 module.exports = {
     cleanJsonResponse,
+    buildJsonCompletionOptions,
+    getJsonRequestPolicy,
     callJsonLLM,
 };

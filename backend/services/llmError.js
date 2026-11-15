@@ -24,6 +24,14 @@ const classifyLlmError = (error) => {
             error: 'AI 模型尚未完成配置，请联系管理员配置豆包模型后重试。',
         };
     }
+    if (error?.name === 'APIConnectionTimeoutError'
+        || /ETIMEDOUT|ESOCKETTIMEDOUT|request timed out|connection timed out|timeout of \d+ms exceeded/i.test(text)) {
+        return {
+            status: 504,
+            code: 'MODEL_TIMEOUT',
+            error: '豆包模型响应超时，系统已停止本次审查，请稍后重试。',
+        };
+    }
     if (/AccountOverdue|overdue|欠费/i.test(text)) {
         return {
             status: 503,

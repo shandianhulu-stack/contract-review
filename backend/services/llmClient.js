@@ -133,21 +133,49 @@ const createWithAccountFailover = async ({ options, requestOptions, vision = fal
         throw new Error('No complete LLM account configuration is available.');
     }
 
-    const maxRetries = Number(process.env.LLM_MAX_RETRIES || 2);
+    const {
+        timeout: requestTimeout,
+        maxRetries: requestMaxRetries,
+        onAttempt,
+        ...sdkRequestOptions
+    } = requestOptions || {};
+    const configuredRetries = Number(requestMaxRetries ?? process.env.LLM_MAX_RETRIES ?? 2);
+    const maxRetries = Number.isFinite(configuredRetries)
+        ? Math.min(5, Math.max(0, Math.trunc(configuredRetries)))
+        : 2;
     const baseDelay = Number(process.env.LLM_RETRY_BASE_MS || 800);
-    const timeout = Number(process.env.LLM_TIMEOUT_MS || 90000);
+    const configuredTimeout = Number(requestTimeout ?? process.env.LLM_TIMEOUT_MS ?? 90000);
+    const timeout = Number.isFinite(configuredTimeout)
+        ? Math.min(600000, Math.max(10000, Math.trunc(configuredTimeout)))
+        : 90000;
+    const maxAttempts = (maxRetries + 1) * accounts.length;
+    let attemptNumber = 0;
     let lastError;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         for (let accountIndex = 0; accountIndex < accounts.length; accountIndex += 1) {
             const account = accounts[accountIndex];
             try {
+                attemptNumber += 1;
+                if (typeof onAttempt === 'function') {
+                    try {
+                        await onAttempt({
+                            attemptNumber,
+                            maxAttempts,
+                            accountIndex: accountIndex + 1,
+                            accountCount: accounts.length,
+                            timeout,
+                        });
+                    } catch (progressError) {
+                        console.warn(`[LLM] Progress callback failed: ${progressError.message}`);
+                    }
+                }
                 return await getLlmClient(account).chat.completions.create({
                     model: vision ? (process.env.VISION_MODEL_NAME || account.model) : account.model,
                     ...options,
                 }, {
                     timeout,
-                    ...requestOptions,
+                    ...sdkRequestOptions,
                 });
             } catch (error) {
                 lastError = error;

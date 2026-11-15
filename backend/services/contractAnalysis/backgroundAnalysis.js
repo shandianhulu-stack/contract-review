@@ -170,6 +170,8 @@ ${relevantKnowledge.map((item, index) => `[${index + 1}] [${item.source_type}] $
 }
 
 硬性要求：
+- 控制报告规模：dispute_points 最多 12 项、missing_clauses 最多 8 项、party_review 最多 5 项、modification_suggestions 最多 12 项、breach_cost_analysis 最多 6 项；优先保留高风险和可执行建议。
+- 每个说明字段应简洁明确，通常不超过 3 句话；不得重复同一风险、同一依据或同一修改建议。
 - modification_suggestions 每一项必须包含 original_text 和 suggested_text。
 - original_text 必须尽量逐字摘录合同原文中的完整句子或段落，用于 OnlyOffice 定位、书签和批注锚点。
 - 必须逐条比对「法律与裁判依据」中每一条法律条文与合同对应条款，特别关注天数、期限、比例、金额、次数等强制性数字是否一致；合同条款与法律规定不一致的（例如法定 15 日被写成 30 日、试用期超过 6 个月、竞业限制超过 2 年），必须列入 dispute_points 并给出对应的 modification_suggestions，不得遗漏。
@@ -188,7 +190,20 @@ ${wrapContractContent(plainText)}
         let analysisResult;
         if (contractCharCount < LONG_CONTRACT_THRESHOLD) {
             // 短合同：原整篇审查（保持现有逻辑）
-            analysisResult = normalizeAnalysisResult(await callJsonLLM(prompt + subjectSearchPrompt), plainText);
+            const onLlmAttempt = async ({ attemptNumber, maxAttempts, accountCount, timeout }) => {
+                const timeoutSeconds = Math.ceil(timeout / 1000);
+                const remainingAttempts = Math.max(1, maxAttempts - attemptNumber + 1);
+                await emitAnalysisProgress(null, contractId, {
+                    step: 'llm_review',
+                    status: 'running',
+                    message: `AI 正在生成审查结论（模型调用 ${attemptNumber}/${maxAttempts}${accountCount > 1 ? `，可用账户 ${accountCount} 个` : ''}）...`,
+                    estimatedRemainingSeconds: timeoutSeconds * remainingAttempts,
+                });
+            };
+            analysisResult = normalizeAnalysisResult(
+                await callJsonLLM(prompt + subjectSearchPrompt, { onAttempt: onLlmAttempt }),
+                plainText,
+            );
         } else {
             // 长合同：条款树分层审查，逐条独立召回法条 + LLM 审查
             const clauses = contractParser.parseContractTree(plainText);

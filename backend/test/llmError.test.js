@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+
 const { classifyLlmError } = require('../services/llmError');
 
 test('classifies missing model configuration without exposing environment details', () => {
@@ -22,4 +23,22 @@ test('classifies Doubao overdue account before generic authorization failure', (
 
 test('returns null for unrelated local errors', () => {
     assert.equal(classifyLlmError(new Error('database is unavailable')), null);
+});
+
+test('classifies OpenAI-compatible connection timeouts without leaking details', () => {
+    const result = classifyLlmError({
+        name: 'APIConnectionTimeoutError',
+        message: 'Request timed out. api-key=must-not-leak',
+    });
+
+    assert.deepEqual(result, {
+        status: 504,
+        code: 'MODEL_TIMEOUT',
+        error: '豆包模型响应超时，系统已停止本次审查，请稍后重试。',
+    });
+    assert.equal(JSON.stringify(result).includes('must-not-leak'), false);
+});
+
+test('classifies common transport timeout codes', () => {
+    assert.equal(classifyLlmError({ code: 'ETIMEDOUT' }).code, 'MODEL_TIMEOUT');
 });

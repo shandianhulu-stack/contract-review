@@ -199,6 +199,7 @@ ${wrapContractContent(plainText)}
             percent: job.percent,
             currentStep: job.currentStep,
             elapsedSeconds: Math.round((Date.now() - job.startedAt) / 1000),
+            estimatedRemainingSeconds: job.estimatedRemainingSeconds,
             steps: job.steps,
             error: job.error,
             result: job.result,
