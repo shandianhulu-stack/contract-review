@@ -91,6 +91,21 @@ export function useReviewEditor(state, helpers) {
         });
     };
 
+    const getSameOriginSelectedText = (displayOptions) => {
+        const onlyOfficeFrame = Array.from(document.querySelectorAll('iframe'))
+            .find((frame) => String(frame.src || '').includes('/onlyoffice/'));
+        if (!onlyOfficeFrame?.contentWindow) return '';
+
+        try {
+            const frameEditor = onlyOfficeFrame.contentWindow.editor;
+            if (typeof frameEditor?.asc_GetSelectedText !== 'function') return '';
+            return String(frameEditor.asc_GetSelectedText(displayOptions) || '');
+        } catch (error) {
+            // Cross-origin deployments cannot use the Community Edition fallback.
+            return '';
+        }
+    };
+
     const getSelectedTextFromEditor = async () => {
         const displayOptions = {
             Numbering: false,
@@ -110,16 +125,25 @@ export function useReviewEditor(state, helpers) {
         }
         if (selectedText && String(selectedText).trim()) return String(selectedText);
 
-        const commandResult = await executeEditorCommand(function() {
-            try {
-                const document = Api.GetDocument();
-                return document && typeof document.GetSelectedText === 'function'
-                    ? document.GetSelectedText()
-                    : '';
-            } catch (error) {
-                return '';
-            }
-        });
+        selectedText = getSameOriginSelectedText(displayOptions);
+        if (selectedText.trim()) return selectedText;
+
+        let commandResult = null;
+        try {
+            commandResult = await executeEditorCommand(function() {
+                try {
+                    const document = Api.GetDocument();
+                    return document && typeof document.GetSelectedText === 'function'
+                        ? document.GetSelectedText()
+                        : '';
+                } catch (error) {
+                    return '';
+                }
+            });
+        } catch {
+            // Community Edition has no Connector API. The same-origin fallback above
+            // is used for the bundled /onlyoffice/ deployment.
+        }
         return commandResult ? String(commandResult) : '';
     };
 
